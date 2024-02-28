@@ -1,13 +1,12 @@
 cmake_minimum_required(VERSION 3.12)
 
-set(ENV{PICO_SDK_PATH} /home/cat/pico/pico-sdk)
-
 if(NOT DEFINED ENV{PICO_SDK_PATH})
-        message(FATAL_ERROR "PICO_SDK_PATH environment variable should be defined")
+        # try define my own PICO_SDK_PATH 
+        message(ERROR "PICO_SDK_PATH environment variable should be defined")
+        set(ENV{PICO_SDK_PATH} /home/cat/pico/pico-sdk)        
 endif()
 
 include("$ENV{PICO_SDK_PATH}/external/pico_sdk_import.cmake")
-
 
 project(clearpath-pi)
 
@@ -17,9 +16,6 @@ add_executable(${PROJECT_NAME} main.cpp)
 
 # Make sure TinyUSB can find tusb_config.h
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR})
-
-# Add Encoder
-target_include_directories(${PROJECT_NAME} PUBLIC include/RP2040-Encoder)
 
 target_link_libraries(${PROJECT_NAME} PUBLIC pico_stdlib tinyusb_host tinyusb_board)
 
