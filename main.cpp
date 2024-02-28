@@ -657,6 +657,17 @@ public:
 
 //
 
+class Lcd_emulation
+{
+public:
+	void goto_pos(int pos, int line)
+	{
+		//LOG("goto_pos %d %d\n", pos, line);
+	}
+	void print(const char* str)
+	{	LOG("print %s\n", str);
+	}
+} lcd;
 
 class User_interface
 {
@@ -672,21 +683,54 @@ class User_interface
         	return b - (f - half_period) * (b - a) / half_period;
 	}
 
-public:
-	static int ui_motor_speed()
-	{
-		return saw(-10, 10, 20000, board_millis()) * 10;
+	Rotary_encoder re;
+	My_button<ENCODER_BUTTON_PIN> re_button = My_button<ENCODER_BUTTON_PIN>();
+
+	int motor_speed = 0;
+
+	int limit_value(int v, int min, int max)
+	{	if(v < min) return min;
+		if(v > max) return max;
+		return v;
 	}
-};
+
+public:
+
+	void initialize()
+	{	
+		re.initialize(ENCODER_PIN_A, ENCODER_PIN_B);
+		re_button.initialize();
+	}
+
+	void task()
+	{
+		auto e = re.process();
+		if(e != 0)
+		{	if(e > 0) motor_speed += 10;
+			else motor_speed -= 10;
+
+			motor_speed = limit_value(motor_speed, -100, 100);
+
+			LOG("motor_speed %+d\n", motor_speed);
+
+			if(motor_speed == 0)
+			{	motor.motor_disable();
+			}
+			else
+			{	motor.motor_enable();
+				//motor.move(motor.MAX_DISTANCE * sign_p, motor.MAX_VELOCITY * p / 100, 2000);
+
+				auto v = (long long)motor.MAX_VELOCITY * motor_speed / 100;
+				motor.set_velocity(v);
+			}
+		}
+	}
+
+} user_interface;
 
 int main()
 {
 	board_init();
-
-	Rotary_encoder rotary_encoder(ENCODER_PIN_A, ENCODER_PIN_B);
-
-	My_button<ENCODER_BUTTON_PIN> user_button = My_button<ENCODER_BUTTON_PIN>();
-	user_button.initialize();
 
 	// settings for picoprobe
 	uart_init(uart0, 9600);
@@ -696,12 +740,12 @@ int main()
 
 	tuh_init(BOARD_TUH_RHPORT);
 
-
 	bool last_button_state = false;
 
 	auto last_motor_query_time = board_millis();
 	int last_motor_position = 0;
-	int last_ui_speed = 0;
+
+	user_interface.initialize();
 
 	while (true)
 	{
@@ -715,7 +759,7 @@ int main()
 				motor.send_initialization_sequence();
 			}
 
-			if(board_millis() - last_motor_query_time >= 1000)
+			if(board_millis() - last_motor_query_time >= 250)
 			{	last_motor_query_time = board_millis();
 		
 				motor.get_position();
@@ -726,31 +770,10 @@ int main()
 					LOG("P %d\n", motor.position);
 				}
 			}
-
-			auto p = User_interface::ui_motor_speed();
-			if(last_ui_speed != p) // if user changed the speed
-			{	last_ui_speed = p;
-
-				LOG("ui_speed %d\n", p);
-
-				if(p == 0)
-				{	motor.motor_disable();
-				}
-				else
-				{	//motor.motor_disable();
-					motor.motor_enable();
-					//motor.move(motor.MAX_DISTANCE * sign_p, motor.MAX_VELOCITY * p / 100, 2000);
-
-					auto v = (long long)motor.MAX_VELOCITY * p / 100;
-					motor.set_velocity(v);
-				}
-			}
 		}
 
-		auto e = rotary_encoder.process();
-
-		if(e) LOG("encoder %+d\n", e);
-	
+		user_interface.task();
+/*
 		auto b = user_button.pressed();
 		if(b != last_button_state)
 		{
@@ -758,15 +781,15 @@ int main()
 		
 			last_button_state = b;
 
-			/*if(b)
+			if(b)
 			{	motor.motor_enable();
 				//motor.move(+5000, motor.MAX_VELOCITY/10, 1000);
 				motor.move(+motor.MAX_DISTANCE, motor.MAX_VELOCITY, 2000);
 						}
 			else
 			{	motor.motor_disable();
-			}*/
-		}
+			}
+		}*/
 	}
 }
 

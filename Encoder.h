@@ -38,7 +38,7 @@ class Rotary_encoder
 	char pin2;
 
 public:
-	Rotary_encoder(char pin1_, char pin2_)
+	void initialize(char pin1_, char pin2_)
 	{
 		pin1 = pin1_;
 		pin2 = pin2_;
