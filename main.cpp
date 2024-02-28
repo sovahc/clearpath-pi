@@ -11,14 +11,25 @@ using std::vector;
 using std::byte;
 
 #include "bsp/board.h"
+#include "hardware/gpio.h"
+#include "hardware/uart.h"
+
 #include "tusb.h"
 
-#include "RP2040-Encoder/quadrature.h"
+#include "pi-pico-LCD/lcd_display/lcd_display.hpp"
 
+constexpr int ENCODER_PIN_A = 2;
+constexpr int ENCODER_PIN_B = 3;
+constexpr int ENCODER_BUTTON_PIN = 4;
 
-constexpr int ENCODER_DATA_PIN = 14;
-constexpr int ENCODER_CLK_PIN = 15;
-constexpr int ENCODER_BUTTON_PIN = 24;
+constexpr int LCD_D4 = 8;
+constexpr int LCD_D5 = 9;
+constexpr int LCD_D6 = 10;
+constexpr int LCD_D7 = 11;
+constexpr int LCD_RS = 12;
+constexpr int LCD_E  = 13;
+
+//LCDdisplay lcd(LCD_D4, LCD_D5, LCD_D6, LCD_D7, LCD_RS, LCD_E, 8, 2);
 
 //
 
@@ -39,6 +50,8 @@ template<bool enabled> class X_log
 };
 
 X_log<true> LOG;
+
+#include "Encoder.h"
 
 //
 
@@ -422,7 +435,7 @@ class Clearpath_motor
 		if(recieve_answer) input_message.receive(tmp, false);
 	}
 
-	void send_integer2(byte b1, int integer, byte b2, bool recieve_answer = true)
+	void send_integer_2(byte b1, int integer, byte b2, bool recieve_answer = true)
 	{
 		tmp.clear();
 		tmp.push_back(b1);
@@ -539,7 +552,7 @@ public:
 		send_integer(byte(0x01), byte(0x3E), acceleration_limit);
 		send_integer(byte(0x01), byte(0xBE), acceleration_limit); // ... ?? repeated
 
-		send_integer2(byte(0x47), v, byte(0x10)); // ISC_CMD_MOVE_VEL_EX
+		send_integer_2(byte(0x47), v, byte(0x10)); // ISC_CMD_MOVE_VEL_EX
 		// 0x10 - MG_MOVE_VEL_IMMEDIATE Regular velocity that starts immediately
 	}
 
@@ -625,28 +638,8 @@ void tuh_cdc_umount_cb(uint8_t idx)
 
 //
 
-template<int A_pin, int B_pin> class My_quadrature_encoder : public Quadrature_encoder<A_pin, B_pin>
-{
-	long old_count = 0;
-public:
-
-using Quadrature_encoder<A_pin, B_pin>::count;
-
-	long delta() // encoder change since last call
-	{
-		auto c = count();
-		auto r = c - old_count;
-		old_count = c;
-		return r;
-	}
-};
-
-//
-
 template<int Pin> class My_button
 {
-	static inline volatile uint32_t registered_time = 0;
-	static inline volatile bool registered = false;
 public:
 
 	void initialize()
@@ -654,35 +647,16 @@ public:
 		gpio_set_dir(Pin, GPIO_IN);
 		gpio_pull_up(Pin);
 
-		sleep_ms(10); // wait for pull up
-
-		irq_handler.register_interrupt(Pin, gpio_irq_handler::irq_event::change, My_button<Pin>::on_change);
-	}
-
-	bool pressed_since_last_call()
-	{	auto r = registered;
-		registered = false;
-		return r;
+		//sleep_ms(10); // wait for pull up
 	}
 
 	bool pressed() // no debouncing here
 	{	return gpio_get(Pin) == 0;
 	}
-
-	static void on_change(uint gpio, uint32_t events) // ISR
-	{
-		auto now = board_millis();
-
-		if (events == GPIO_IRQ_EDGE_RISE)
-		{	if(now - registered_time < 25) return; // debounce
-	
-			registered_time = now;
-			registered = true;
-		}
-	}
 };
 
 //
+
 
 class User_interface
 {
@@ -709,8 +683,7 @@ int main()
 {
 	board_init();
 
-	My_quadrature_encoder<ENCODER_DATA_PIN, ENCODER_CLK_PIN> encoder = My_quadrature_encoder<ENCODER_DATA_PIN, ENCODER_CLK_PIN>();
-	encoder.begin(pull_direction::up, resolution::quarter);
+	Rotary_encoder rotary_encoder(ENCODER_PIN_A, ENCODER_PIN_B);
 
 	My_button<ENCODER_BUTTON_PIN> user_button = My_button<ENCODER_BUTTON_PIN>();
 	user_button.initialize();
@@ -774,10 +747,9 @@ int main()
 			}
 		}
 
-/*
-		auto delta = encoder.delta();
+		auto e = rotary_encoder.process();
 
-		if(delta) LOG("encoder %+d\n", delta);
+		if(e) LOG("encoder %+d\n", e);
 	
 		auto b = user_button.pressed();
 		if(b != last_button_state)
@@ -786,15 +758,15 @@ int main()
 		
 			last_button_state = b;
 
-			if(b)
+			/*if(b)
 			{	motor.motor_enable();
 				//motor.move(+5000, motor.MAX_VELOCITY/10, 1000);
 				motor.move(+motor.MAX_DISTANCE, motor.MAX_VELOCITY, 2000);
 						}
 			else
 			{	motor.motor_disable();
-			}
-		}*/
+			}*/
+		}
 	}
 }
 
