@@ -671,18 +671,6 @@ public:
 
 class User_interface
 {
-	// generates a sawtooth wave
-	static int saw(int a, int b, unsigned half_period, unsigned t)
-	{	
-		t += half_period / 2; // start from (a+b)/2
-		
-		unsigned f = t % (half_period * 2);
-		if(f < half_period)
-        	return a + f * (b - a) / half_period;
-    	else
-        	return b - (f - half_period) * (b - a) / half_period;
-	}
-
 	Rotary_encoder re;
 	My_button<ENCODER_BUTTON_PIN> re_button = My_button<ENCODER_BUTTON_PIN>();
 
@@ -704,12 +692,13 @@ public:
 
 	void task()
 	{
-		auto e = re.process();
-		if(e != 0)
-		{	if(e > 0) motor_speed += 10;
-			else motor_speed -= 10;
+		auto v = Rotary_encoder::value;
 
-			motor_speed = limit_value(motor_speed, -100, 100);
+		auto pms = motor_speed;
+		motor_speed = limit_value(v * 5, -100, 100);
+
+		if(pms != motor_speed)
+		{	pms = motor_speed;
 
 			LOG("motor_speed %+d\n", motor_speed);
 

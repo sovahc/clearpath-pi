@@ -33,23 +33,11 @@ constexpr char ttable[7][4] =
 
 class Rotary_encoder
 {
-	char state;
-	char pin1;
-	char pin2;
+	static char state;
+	static char pin1;
+	static char pin2;
 
-public:
-	void initialize(char pin1_, char pin2_)
-	{
-		pin1 = pin1_;
-		pin2 = pin2_;
-
-		gpio_init(pin1); gpio_set_dir(pin1, GPIO_IN); gpio_pull_up(pin1);
-		gpio_init(pin2); gpio_set_dir(pin2, GPIO_IN); gpio_pull_up(pin2);
-
-		state = R_START;
-	}
-
-	int process()
+	static int process()
 	{   // Grab state of input pins.
 		char state_1 = gpio_get(pin1);
 		char state_2 = gpio_get(pin2);
@@ -63,4 +51,35 @@ public:
 		if(state & CCW_STEP) return -1;
 		return 0;
 	}
+
+public:
+	static int value;
+
+	static void initialize(char pin1_, char pin2_)
+	{
+		pin1 = pin1_;
+		pin2 = pin2_;
+
+		state = R_START;
+		value = 0;
+
+		gpio_init(pin1); gpio_set_dir(pin1, GPIO_IN); gpio_pull_up(pin1);
+		gpio_init(pin2); gpio_set_dir(pin2, GPIO_IN); gpio_pull_up(pin2);
+
+		auto change = GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL;
+		gpio_set_irq_enabled_with_callback(pin1, change, true, &Rotary_encoder::isr);
+		gpio_set_irq_enabled(pin2, change, true);
+
+		
+	}
+
+	static void isr(uint gpio, uint32_t events)
+	{
+		value += process();
+	}
 };
+
+int Rotary_encoder::value = 0;
+char Rotary_encoder::pin1;
+char Rotary_encoder::pin2;
+char Rotary_encoder::state;
