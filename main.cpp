@@ -1,6 +1,3 @@
-// 
-// https://github.com/martinkooij/pi-pico-LCD
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
@@ -128,44 +125,51 @@ public:
 	}
 };
 
-//
-
-void convert_7_to_8_bit(const vector<byte>& input, vector<byte>& output, int integer_size)
+/**
+ * Converts a vector of 7-bit bytes to 8-bit bytes.
+ *
+ * Pads the output to the specified integer size by appending filler bytes
+ * (0xFF or 0x00 depending on the sign bit of the last input byte).
+ */
+void convert_7_to_8_bit(const vector<byte> &input, vector<byte> &output, int integer_size)
 {
-	if(input.empty()) return;
+	if (input.empty())
+		return;
 
-    int acc = 0;
-    int bitCount = 0;
+	int acc = 0;
+	int bitCount = 0;
 
 	byte filler = byte(0);
-	
-	if(integer_size != 0)
-	{	bool last_bit = byte(0) != (input.back() & byte(0x40));
+
+	if (integer_size != 0)
+	{
+		bool last_bit = byte(0) != (input.back() & byte(0x40));
 		filler = byte(last_bit ? 0xFF : 0);
 	}
 
-    for (auto b : input)
-    {
-        acc |= int(b) << bitCount;
-        bitCount += 7;
+	for (auto b : input)
+	{
+		acc |= int(b) << bitCount;
+		bitCount += 7;
 
-        if (bitCount >= 8)
-        {
-            output.push_back(byte(acc));
-            acc >>= 8;
-            bitCount -= 8;
-        }
-    }
+		if (bitCount >= 8)
+		{
+			output.push_back(byte(acc));
+			acc >>= 8;
+			bitCount -= 8;
+		}
+	}
 
-    if (bitCount > 0)
-	{	
+	if (bitCount > 0)
+	{
 		acc |= int(filler) << bitCount;
 
 		output.push_back(byte(acc));
 	}
 
-	while(output.size() < integer_size)
-	{	output.push_back(filler);
+	while (output.size() < integer_size)
+	{
+		output.push_back(filler);
 	}
 }
 
@@ -506,6 +510,8 @@ public:
 		send_hex8("01 98 54 00 18 91"); // ISC_CMD_SET_PARAM ?
 
 		send_hex8("17"); // ISC_CMD_GET_SET_STIMULUS
+
+		LOG("/initialization\n");
 	}
 
 	void motor_enable()
@@ -521,7 +527,7 @@ public:
 		send_hex8("01 67 00 00 00 00"); // ISC_CMD_SET_PARAM
 	}
 
-	void move(int distance, int velocity_limit, int acceleration_limit)
+	void motor_move(int distance, int velocity_limit, int acceleration_limit)
 	{
 		LOG("move %d\n", distance);
 
@@ -578,8 +584,14 @@ public:
 		return int_from_vector(tmp);
 	}
 
-	void ping() // keep-alive
-	{	if(board_millis() - last_motor_query_time > 1000) get_position();
+	/**
+	 * Keep-alive function that periodically queries motor position
+	 * to prevent motor from timing out.
+	 */
+	void ping()
+	{
+		if (board_millis() - last_motor_query_time > 1000)
+			get_position();
 	}
 
 	void byte_received(byte b)
@@ -704,7 +716,7 @@ class User_interface
 	int division_step = 0;
 	int division_reference_point = 0;
 
-	const float ENCODER_STEPS_PER_ROTATION = 3925.44f; // my lathe
+	const float ENCODER_STEPS_PER_ROTATION = 3925.44f; // my lathe belt transmission
 
 	enum MENU
 	{	MENU_SPEED_CONTROL,
