@@ -69,8 +69,6 @@ public:
 		auto change = GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL;
 		gpio_set_irq_enabled_with_callback(pin1, change, true, &Rotary_encoder::isr);
 		gpio_set_irq_enabled(pin2, change, true);
-
-		
 	}
 
 	static void isr(uint gpio, uint32_t events)

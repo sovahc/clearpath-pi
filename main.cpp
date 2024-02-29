@@ -18,6 +18,8 @@ using std::byte;
 
 #include "pi-pico-LCD/lcd_display/lcd_display.hpp"
 
+#include "Encoder.h"
+
 constexpr int ENCODER_PIN_A = 2;
 constexpr int ENCODER_PIN_B = 3;
 constexpr int ENCODER_BUTTON_PIN = 4;
@@ -50,8 +52,6 @@ template<bool enabled> class X_log
 };
 
 X_log<true> LOG;
-
-#include "Encoder.h"
 
 //
 
@@ -556,34 +556,42 @@ public:
 		// 0x10 - MG_MOVE_VEL_IMMEDIATE Regular velocity that starts immediately
 	}
 
-	void get_position()
+	int get_position()
 	{
 		send_hex8("00 53", false); // ISC_CMD_GET_PARAM CPM_P_POSN_MEAS
 		input_message.receive(tmp, true);
 
-		position = int_from_vector(tmp);
+		last_motor_query_time = board_millis();
+
+		return int_from_vector(tmp);
 
 		// Sometimes encoder jump +128 when crossing zero. I think it's a motor bug.
 	}
 
-	void get_velocity()
+	int get_velocity()
 	{	
 		send_hex8("00 55", false); // ISC_CMD_GET_PARAM CPM_P_VEL_MEAS
 		input_message.receive(tmp, true);
 
-		velocity = int_from_vector(tmp);
+		last_motor_query_time = board_millis();
+
+		return int_from_vector(tmp);
+	}
+
+	void ping() // keep-alive
+	{	if(board_millis() - last_motor_query_time > 1000) get_position();
 	}
 
 	void byte_received(byte b)
 	{
 		input_message.byte_received(b);
 	}
+private:
+	uint32_t last_motor_query_time = 0;
+public:
 
 	volatile bool connected = false;
 	volatile bool initialized = false;
-
-	int position = 0;
-	int velocity = 0;
 
 	const int MAX_VELOCITY = 0x205FFFF;
 	const int MAX_DISTANCE = 0x7FFffff;
@@ -640,46 +648,78 @@ void tuh_cdc_umount_cb(uint8_t idx)
 
 template<int Pin> class My_button
 {
-public:
+	uint32_t last_pressed_time;
 
+public:
 	void initialize()
 	{	gpio_init(Pin);
 		gpio_set_dir(Pin, GPIO_IN);
 		gpio_pull_up(Pin);
-
-		//sleep_ms(10); // wait for pull up
 	}
 
-	bool pressed() // no debouncing here
-	{	return gpio_get(Pin) == 0;
+	bool pressed()
+	{	
+		if(gpio_get(Pin) != 0) return false;
+
+		uint32_t now = board_millis();
+
+		if(now - last_pressed_time > 250) //25
+		{	last_pressed_time = now;
+			return true;
+		}
+		else
+		{	last_pressed_time = now;
+			return false;
+		}
 	}
 };
 
 //
 
-class Lcd_emulation
-{
-public:
-	void goto_pos(int pos, int line)
-	{
-		//LOG("goto_pos %d %d\n", pos, line);
-	}
-	void print(const char* str)
-	{	LOG("print %s\n", str);
-	}
-} lcd;
+// class Lcd_emulation
+// {
+// public:
+// 	void goto_pos(int pos, int line)
+// 	{
+// 		//LOG("goto_pos %d %d\n", pos, line);
+// 	}
+// 	void print(const char* str)
+// 	{	LOG("print %s\n", str);
+// 	}
+// } lcd;
 
 class User_interface
 {
-	Rotary_encoder re;
-	My_button<ENCODER_BUTTON_PIN> re_button = My_button<ENCODER_BUTTON_PIN>();
-
-	int motor_speed = 0;
-
 	int limit_value(int v, int min, int max)
 	{	if(v < min) return min;
 		if(v > max) return max;
 		return v;
+	}
+
+	Rotary_encoder re;
+	My_button<ENCODER_BUTTON_PIN> re_button = My_button<ENCODER_BUTTON_PIN>();
+
+	int motor_speed = 0;
+	int division_steps = 1;
+	int division_step = 0;
+	int division_reference_point = 0;
+
+	const float ENCODER_STEPS_PER_ROTATION = 3925.44f; // my lathe
+
+	enum MENU
+	{	MENU_SPEED_CONTROL,
+		MENU_SET_DIVIDER,
+		MENU_DIVISION,
+		MENU_LAST = MENU_DIVISION,
+	};
+	int menu;
+
+	void update_lcd()
+	{	switch(menu)
+		{	case MENU_SPEED_CONTROL: LOG("> SPEED CONTROL\n"); break;
+			case MENU_SET_DIVIDER: LOG("> SET DIVIDER\n"); break;
+			case MENU_DIVISION: LOG("> DIVISION\n"); break;
+		}
 	}
 
 public:
@@ -688,30 +728,84 @@ public:
 	{	
 		re.initialize(ENCODER_PIN_A, ENCODER_PIN_B);
 		re_button.initialize();
+
+		menu = MENU_SPEED_CONTROL;
+
+		update_lcd();
 	}
 
 	void task()
 	{
-		auto v = Rotary_encoder::value;
+		if(re_button.pressed())
+		{	LOG("re pressed\n");
 
-		auto pms = motor_speed;
-		motor_speed = limit_value(v * 5, -100, 100);
-
-		if(pms != motor_speed)
-		{	pms = motor_speed;
-
-			LOG("motor_speed %+d\n", motor_speed);
-
-			if(motor_speed == 0)
-			{	motor.motor_disable();
+			if(menu == MENU_SPEED_CONTROL) // stop motor if it spinning
+			{	if(motor_speed != 0)				
+				{	motor_speed = 0;
+					motor.motor_disable();					
+				}
 			}
-			else
-			{	motor.motor_enable();
-				//motor.move(motor.MAX_DISTANCE * sign_p, motor.MAX_VELOCITY * p / 100, 2000);
 
-				auto v = (long long)motor.MAX_VELOCITY * motor_speed / 100;
-				motor.set_velocity(v);
+			Rotary_encoder::value = 0;
+
+			if(++menu > MENU_LAST) menu = MENU_SPEED_CONTROL;
+
+			if(menu == MENU_DIVISION)
+			{	
+				division_reference_point = motor.get_position();
 			}
+
+			update_lcd();
+		}
+
+		if(menu == MENU_SPEED_CONTROL)
+		{
+			auto v = Rotary_encoder::value;
+
+			auto pms = motor_speed;
+			motor_speed = limit_value(v * 5, -100, 100);
+
+			if(pms != motor_speed)
+			{	pms = motor_speed;
+
+				LOG("motor_speed %+d\n", motor_speed);
+
+				if(motor_speed == 0)
+				{	motor.motor_disable();
+				}
+				else
+				{	motor.motor_enable();
+					//motor.move(motor.MAX_DISTANCE * sign_p, motor.MAX_VELOCITY * p / 100, 2000);
+
+					auto v = (long long)motor.MAX_VELOCITY * motor_speed / 100;
+					motor.set_velocity(v);
+				}
+			}
+		}
+		else if(menu == MENU_SET_DIVIDER)
+		{	
+			Rotary_encoder::value = limit_value(Rotary_encoder::value, 1, 360);
+
+			auto pds = division_steps;
+			division_steps = Rotary_encoder::value;
+
+			if(pds != division_steps)
+			{	pds = division_steps;
+				LOG("division_steps %d\n", division_steps);
+			}
+		}
+		else if(menu == MENU_DIVISION)
+		{
+			Rotary_encoder::value = limit_value(Rotary_encoder::value, 0, division_steps * 100);
+			auto d = Rotary_encoder::value;
+			
+			auto p = motor.get_position();
+
+			int offset = int(ENCODER_STEPS_PER_ROTATION * d / division_steps);
+
+			int delta = p - division_reference_point + offset;
+			
+			LOG("%d/%d %+d\n", d, division_steps, delta);
 		}
 	}
 
@@ -729,11 +823,6 @@ int main()
 
 	tuh_init(BOARD_TUH_RHPORT);
 
-	bool last_button_state = false;
-
-	auto last_motor_query_time = board_millis();
-	int last_motor_position = 0;
-
 	user_interface.initialize();
 
 	while (true)
@@ -748,37 +837,10 @@ int main()
 				motor.send_initialization_sequence();
 			}
 
-			if(board_millis() - last_motor_query_time >= 250)
-			{	last_motor_query_time = board_millis();
-		
-				motor.get_position();
-
-				if(motor.position != last_motor_position)
-				{	last_motor_position = motor.position;
-
-					LOG("P %d\n", motor.position);
-				}
-			}
+			motor.ping();
 		}
 
 		user_interface.task();
-/*
-		auto b = user_button.pressed();
-		if(b != last_button_state)
-		{
-			LOG("button %d -> %d\n", last_button_state, b);
-		
-			last_button_state = b;
-
-			if(b)
-			{	motor.motor_enable();
-				//motor.move(+5000, motor.MAX_VELOCITY/10, 1000);
-				motor.move(+motor.MAX_DISTANCE, motor.MAX_VELOCITY, 2000);
-						}
-			else
-			{	motor.motor_disable();
-			}
-		}*/
 	}
 }
 
