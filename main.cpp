@@ -11,6 +11,9 @@ using std::byte;
 #include "hardware/gpio.h"
 #include "hardware/uart.h"
 
+#include "pico/util/queue.h"
+#include "pico/multicore.h"
+
 #include "tusb.h"
 
 #include "pi-pico-LCD/lcd_display/lcd_display.hpp"
@@ -27,8 +30,7 @@ constexpr int LCD_D6 = 10;
 constexpr int LCD_D7 = 11;
 constexpr int LCD_RS = 12;
 constexpr int LCD_E  = 13;
-
-//LCDdisplay lcd(LCD_D4, LCD_D5, LCD_D6, LCD_D7, LCD_RS, LCD_E, 8, 2);
+constexpr int LCD_RW  = 14;
 
 //
 
@@ -686,19 +688,70 @@ public:
 	}
 };
 
-//
+// I moved LCD control to second core in order to keep the signal speeds low
+class LCD
+{
+	typedef struct
+	{
+    	byte x, y;
+    	char text[8+1];
+	} queue_entry_t;
 
-// class Lcd_emulation
-// {
-// public:
-// 	void goto_pos(int pos, int line)
-// 	{
-// 		//LOG("goto_pos %d %d\n", pos, line);
-// 	}
-// 	void print(const char* str)
-// 	{	LOG("print %s\n", str);
-// 	}
-// } lcd;
+	static queue_t print_queue;
+
+public:
+	static void initialize()
+	{	
+		queue_init(&print_queue, sizeof(queue_entry_t), 2);
+
+		multicore_launch_core1(core1_entry);	
+	}
+
+	static void core1_entry()
+	{
+		LCDdisplay lcd(LCD_D4, LCD_D5, LCD_D6, LCD_D7, LCD_RS, LCD_E, 8, 2);
+
+		// LCDdisplay does not control this pin
+		gpio_init(LCD_RW);
+		gpio_set_dir(LCD_RW, GPIO_OUT);
+		gpio_put(LCD_RW, 0); // write
+
+		lcd.init();
+
+		queue_entry_t e;
+
+		while(true)
+		{	queue_remove_blocking(&print_queue, &e);
+
+			lcd.goto_pos(int(e.x), int(e.y));
+			lcd.print(e.text);
+		}
+	}
+
+	static void print(int x, int y, const char* str, ...)
+	{
+		queue_entry_t e;
+		e.x = byte(x);
+		e.y = byte(y);
+
+		va_list va; 
+		va_start(va, str);
+	
+		vsnprintf(e.text, sizeof(e.text), str, va);
+	
+		va_end(va);
+
+		int l = strlen(e.text);
+		if(l < 8) strncat(e.text, "________", 8-l);
+		if(strlen(e.text) != 8)
+			return ERROR_AT(__LINE__);
+
+		if(!queue_try_add(&print_queue, &e))
+			return ERROR_AT(__LINE__);
+	}
+};
+
+queue_t LCD::print_queue;
 
 class User_interface
 {
@@ -714,13 +767,13 @@ class User_interface
 	int motor_speed = 0;
 	int division_steps = 1;
 	int division_step = 0;
-	int division_reference_point = 0;
+	int division_reference_position = 0;
 
 	const float ENCODER_STEPS_PER_ROTATION = 3925.44f; // my lathe belt transmission
 
 	enum MENU
 	{	MENU_SPEED_CONTROL,
-		MENU_SET_DIVIDER,
+		MENU_SET_STEPS,
 		MENU_DIVISION,
 		MENU_LAST = MENU_DIVISION,
 	};
@@ -728,9 +781,9 @@ class User_interface
 
 	void update_lcd()
 	{	switch(menu)
-		{	case MENU_SPEED_CONTROL: LOG("> SPEED CONTROL\n"); break;
-			case MENU_SET_DIVIDER: LOG("> SET DIVIDER\n"); break;
-			case MENU_DIVISION: LOG("> DIVISION\n"); break;
+		{	case MENU_SPEED_CONTROL: LCD::print(0, 0, "SPEED"); break;
+			case MENU_SET_STEPS: LCD::print(0, 0, "STEPS"); break;
+			case MENU_DIVISION: LCD::print(0, 0, "DIVISION"); break;
 		}
 	}
 
@@ -764,7 +817,7 @@ public:
 
 			if(menu == MENU_DIVISION)
 			{	
-				division_reference_point = motor.get_position();
+				division_reference_position = motor.get_position();
 			}
 
 			update_lcd();
@@ -780,8 +833,8 @@ public:
 			if(pms != motor_speed)
 			{	pms = motor_speed;
 
-				LOG("motor_speed %+d\n", motor_speed);
-
+				LCD::print(0, 1, "%+d", motor_speed);
+				
 				if(motor_speed == 0)
 				{	motor.motor_disable();
 				}
@@ -794,7 +847,7 @@ public:
 				}
 			}
 		}
-		else if(menu == MENU_SET_DIVIDER)
+		else if(menu == MENU_SET_STEPS)
 		{	
 			Rotary_encoder::value = limit_value(Rotary_encoder::value, 1, 360);
 
@@ -803,7 +856,7 @@ public:
 
 			if(pds != division_steps)
 			{	pds = division_steps;
-				LOG("division_steps %d\n", division_steps);
+				LCD::print(0, 1, "%d", division_steps);
 			}
 		}
 		else if(menu == MENU_DIVISION)
@@ -815,13 +868,15 @@ public:
 
 			int offset = int(ENCODER_STEPS_PER_ROTATION * d / division_steps);
 
-			int delta = p - division_reference_point + offset;
+			int delta = p - division_reference_position + offset;
 			
-			LOG("%d/%d %+d\n", d, division_steps, delta);
+			LCD::print(0, 0, "%d/%d", d, division_steps);
+			LCD::print(0, 1, "%+d", delta);
 		}
 	}
 
 } user_interface;
+
 
 int main()
 {
@@ -832,6 +887,8 @@ int main()
 	gpio_set_function(0, GPIO_FUNC_UART);
 	gpio_set_function(1, GPIO_FUNC_UART);
 	//
+
+	LCD::initialize();
 
 	tuh_init(BOARD_TUH_RHPORT);
 

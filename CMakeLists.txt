@@ -17,7 +17,9 @@ add_executable(${PROJECT_NAME} main.cpp)
 # Make sure TinyUSB can find tusb_config.h
 target_include_directories(${PROJECT_NAME} PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 
-target_link_libraries(${PROJECT_NAME} PUBLIC pico_stdlib tinyusb_host tinyusb_board)
+target_link_libraries(${PROJECT_NAME} PUBLIC pico_stdlib tinyusb_host tinyusb_board pico_multicore lcd_display)
+
+add_subdirectory(pi-pico-LCD/lcd_display)
 
 # Create map/bin/hex/uf2 files
 pico_add_extra_outputs(${PROJECT_NAME})
