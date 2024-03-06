@@ -20,8 +20,8 @@ using std::byte;
 
 #include "Encoder.h"
 
-constexpr int ENCODER_PIN_A = 2;
-constexpr int ENCODER_PIN_B = 3;
+constexpr int ENCODER_PIN_A = 3;
+constexpr int ENCODER_PIN_B = 2;
 constexpr int ENCODER_BUTTON_PIN = 4;
 
 constexpr int LCD_D4 = 8;
@@ -31,6 +31,7 @@ constexpr int LCD_D7 = 11;
 constexpr int LCD_RS = 12;
 constexpr int LCD_E  = 13;
 constexpr int LCD_RW  = 14;
+
 
 //
 
@@ -50,7 +51,97 @@ template<bool enabled> class X_log
 	}
 };
 
-X_log<true> LOG;
+X_log<false> LOG;
+
+//
+
+// I moved LCD control to second core to keep the signal speeds low
+class LCD
+{
+	typedef struct
+	{
+    	char content[2][8+1];
+	} screen;
+
+	static screen s;
+	static mutex_t my_mutex;
+
+public:
+	static void initialize()
+	{
+		//memset(&s, 0, sizeof(s));
+		s.content[0][0] = 0;
+		s.content[1][0] = 0;
+		mutex_init(&my_mutex);
+
+		multicore_launch_core1(core1_entry);	
+	}
+
+	static void core1_entry()
+	{
+		sleep_ms(500);
+
+		LCDdisplay lcd(LCD_D4, LCD_D5, LCD_D6, LCD_D7, LCD_RS, LCD_E, 8, 2);
+
+		// LCDdisplay does not control this pin
+		gpio_init(LCD_RW);
+		gpio_set_dir(LCD_RW, GPIO_OUT);
+		gpio_put(LCD_RW, 0); // write
+
+		sleep_ms(100);
+
+		lcd.init();
+		lcd.clear();
+
+		while(true)
+		{	
+			mutex_enter_blocking(&my_mutex);
+
+			screen copy = s;
+
+			mutex_exit(&my_mutex);
+
+			// xx: update only on changes?
+
+			lcd.goto_pos(0, 0);
+			lcd.print(copy.content[0]);
+			//LOG("LCD0 %s", copy.content[0]);
+
+			lcd.goto_pos(0, 1);
+			lcd.print(copy.content[1]);
+			//LOG("LCD1 %s", copy.content[1]);
+		}
+	}
+
+	static void fill_to8(char* s)
+	{
+		int l = strlen(s);
+		if(l < 8) strncat(s, "        ", 8-l);
+	}
+
+	static void print(int y, const char* str, ...)
+	{
+		if(y < 0 || y >= 2) return;
+
+    	mutex_enter_blocking(&my_mutex);
+
+		va_list va; 
+		va_start(va, str);
+
+		vsnprintf(s.content[y], sizeof(s.content[y]), str, va);
+	
+		va_end(va);
+
+		fill_to8(s.content[y]);
+
+		mutex_exit(&my_mutex);
+
+		LOG("%d %s\n", y, s.content[y]);
+	}
+};
+
+LCD::screen LCD::s;
+mutex_t LCD::my_mutex;
 
 //
 
@@ -82,7 +173,7 @@ public:
 
 };
 
-X_byte_logger<true> DUMP_BYTES;
+X_byte_logger<false> DUMP_BYTES;
 
 class X_rare_error_tracking
 {
@@ -102,7 +193,8 @@ public:
 
 	void operator () (unsigned line)
 	{
-		LOG("\nE%d ", line);
+		//LOG("\nE%d ", line);
+		LCD::print(0, "E%d", line);
 	
 		++errors[line];
 	}
@@ -519,7 +611,6 @@ public:
 	void motor_enable()
 	{	LOG("motor_enable\n");
 
-		//send_hex8("01 67 00 00 00 00"); // motor disable
 		send_hex8("01 67 00 00 01 00"); // ISC_CMD_SET_PARAM
 	}
 
@@ -677,6 +768,7 @@ public:
 
 		uint32_t now = board_millis();
 
+		// debounce
 		if(now - last_pressed_time > 250) //25
 		{	last_pressed_time = now;
 			return true;
@@ -687,71 +779,6 @@ public:
 		}
 	}
 };
-
-// I moved LCD control to second core in order to keep the signal speeds low
-class LCD
-{
-	typedef struct
-	{
-    	byte x, y;
-    	char text[8+1];
-	} queue_entry_t;
-
-	static queue_t print_queue;
-
-public:
-	static void initialize()
-	{	
-		queue_init(&print_queue, sizeof(queue_entry_t), 2);
-
-		multicore_launch_core1(core1_entry);	
-	}
-
-	static void core1_entry()
-	{
-		LCDdisplay lcd(LCD_D4, LCD_D5, LCD_D6, LCD_D7, LCD_RS, LCD_E, 8, 2);
-
-		// LCDdisplay does not control this pin
-		gpio_init(LCD_RW);
-		gpio_set_dir(LCD_RW, GPIO_OUT);
-		gpio_put(LCD_RW, 0); // write
-
-		lcd.init();
-
-		queue_entry_t e;
-
-		while(true)
-		{	queue_remove_blocking(&print_queue, &e);
-
-			lcd.goto_pos(int(e.x), int(e.y));
-			lcd.print(e.text);
-		}
-	}
-
-	static void print(int x, int y, const char* str, ...)
-	{
-		queue_entry_t e;
-		e.x = byte(x);
-		e.y = byte(y);
-
-		va_list va; 
-		va_start(va, str);
-	
-		vsnprintf(e.text, sizeof(e.text), str, va);
-	
-		va_end(va);
-
-		int l = strlen(e.text);
-		if(l < 8) strncat(e.text, "________", 8-l);
-		if(strlen(e.text) != 8)
-			return ERROR_AT(__LINE__);
-
-		if(!queue_try_add(&print_queue, &e))
-			return ERROR_AT(__LINE__);
-	}
-};
-
-queue_t LCD::print_queue;
 
 class User_interface
 {
@@ -781,9 +808,9 @@ class User_interface
 
 	void update_lcd()
 	{	switch(menu)
-		{	case MENU_SPEED_CONTROL: LCD::print(0, 0, "SPEED"); break;
-			case MENU_SET_STEPS: LCD::print(0, 0, "STEPS"); break;
-			case MENU_DIVISION: LCD::print(0, 0, "DIVISION"); break;
+		{	case MENU_SPEED_CONTROL: LCD::print(0, "SPEED"); break;
+			case MENU_SET_STEPS: LCD::print(0, "STEPS"); break;
+			case MENU_DIVISION: LCD::print(0, "DIVISION"); break;
 		}
 	}
 
@@ -833,7 +860,7 @@ public:
 			if(pms != motor_speed)
 			{	pms = motor_speed;
 
-				LCD::print(0, 1, "%+d", motor_speed);
+				LCD::print(1, "%+d", motor_speed);
 				
 				if(motor_speed == 0)
 				{	motor.motor_disable();
@@ -856,7 +883,7 @@ public:
 
 			if(pds != division_steps)
 			{	pds = division_steps;
-				LCD::print(0, 1, "%d", division_steps);
+				LCD::print(1, "%d", division_steps);
 			}
 		}
 		else if(menu == MENU_DIVISION)
@@ -870,8 +897,8 @@ public:
 
 			int delta = p - division_reference_position + offset;
 			
-			LCD::print(0, 0, "%d/%d", d, division_steps);
-			LCD::print(0, 1, "%+d", delta);
+			LCD::print(0, "%d/%d", d, division_steps);
+			LCD::print(1, "%+d", delta);
 		}
 	}
 
@@ -889,6 +916,8 @@ int main()
 	//
 
 	LCD::initialize();
+
+	LCD::print(0, "LOADING");
 
 	tuh_init(BOARD_TUH_RHPORT);
 
