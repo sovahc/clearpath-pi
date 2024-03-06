@@ -1,7 +1,8 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <string.h>
+#include <cstdlib>
+#include <cstdio>
+#include <cstdarg>
+#include <cstring>
+#include <cmath>
 
 #include <vector>
 using std::vector;
@@ -657,6 +658,8 @@ public:
 
 	int get_position()
 	{
+		if(!connected) return -1;
+
 		send_hex8("00 53", false); // ISC_CMD_GET_PARAM CPM_P_POSN_MEAS
 		input_message.receive(tmp, true);
 
@@ -802,17 +805,10 @@ class User_interface
 	{	MENU_SPEED_CONTROL,
 		MENU_SET_STEPS,
 		MENU_DIVISION,
-		MENU_LAST = MENU_DIVISION,
+		MENU_ANGLE,
+		MENU_LAST = MENU_ANGLE,
 	};
 	int menu;
-
-	void update_lcd()
-	{	switch(menu)
-		{	case MENU_SPEED_CONTROL: LCD::print(0, "SPEED"); break;
-			case MENU_SET_STEPS: LCD::print(0, "STEPS"); break;
-			case MENU_DIVISION: LCD::print(0, "DIVISION"); break;
-		}
-	}
 
 public:
 
@@ -822,8 +818,6 @@ public:
 		re_button.initialize();
 
 		menu = MENU_SPEED_CONTROL;
-
-		update_lcd();
 	}
 
 	void task()
@@ -846,8 +840,6 @@ public:
 			{	
 				division_reference_position = motor.get_position();
 			}
-
-			update_lcd();
 		}
 
 		if(menu == MENU_SPEED_CONTROL)
@@ -857,10 +849,11 @@ public:
 			auto pms = motor_speed;
 			motor_speed = limit_value(v * 5, -100, 100);
 
+			LCD::print(0, "SPEED");
+			LCD::print(1, "%+d", motor_speed);
+
 			if(pms != motor_speed)
 			{	pms = motor_speed;
-
-				LCD::print(1, "%+d", motor_speed);
 				
 				if(motor_speed == 0)
 				{	motor.motor_disable();
@@ -881,10 +874,8 @@ public:
 			auto pds = division_steps;
 			division_steps = Rotary_encoder::value;
 
-			if(pds != division_steps)
-			{	pds = division_steps;
-				LCD::print(1, "%d", division_steps);
-			}
+			LCD::print(0, "STEPS");
+			LCD::print(1, "%d", division_steps);
 		}
 		else if(menu == MENU_DIVISION)
 		{
@@ -899,6 +890,12 @@ public:
 			
 			LCD::print(0, "%d/%d", d, division_steps);
 			LCD::print(1, "%+d", delta);
+		}
+		else if(menu == MENU_ANGLE)
+		{
+			auto p = motor.get_position();
+			LCD::print(0, "ANGLE");
+			LCD::print(1, "%+.2f", 360 * fmod(p, ENCODER_STEPS_PER_ROTATION));
 		}
 	}
 
