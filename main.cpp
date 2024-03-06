@@ -59,7 +59,7 @@ class LCD
 {
 	typedef struct
 	{
-    	char content[2][8+1];
+		char content[2][8+1];
 	} screen;
 
 	static screen s;
@@ -122,7 +122,7 @@ public:
 	{
 		if(y < 0 || y >= 2) return;
 
-    	mutex_enter_blocking(&my_mutex);
+		mutex_enter_blocking(&my_mutex);
 
 		va_list va; 
 		va_start(va, str);
@@ -268,23 +268,23 @@ void convert_7_to_8_bit(const vector<byte> &input, vector<byte> &output, int int
 
 void convert_8_to_7_bit(const vector<byte>& input, vector<byte>& output)
 {
-    int acc = 0;
-    int bitCount = 0;
+	int acc = 0;
+	int bitCount = 0;
 
-    for (auto b : input)
-    {
-        acc |= int(b) << bitCount;
-        bitCount += 8;
+	for (auto b : input)
+	{
+		acc |= int(b) << bitCount;
+		bitCount += 8;
 
-        while (bitCount >= 7)
-        {
-            output.push_back(byte(acc & 0x7F));
-            acc >>= 7;
-            bitCount -= 7;
-        }
-    }
+		while (bitCount >= 7)
+		{
+			output.push_back(byte(acc & 0x7F));
+			acc >>= 7;
+			bitCount -= 7;
+		}
+	}
 
-    if (bitCount > 0) output.push_back(byte(acc & 0x7F));
+	if (bitCount > 0) output.push_back(byte(acc & 0x7F));
 }
 
 void int_to_vector(vector<byte>& data, int i)
@@ -316,7 +316,7 @@ public:
 	Timeout(int timeout_ms)
 	{	start = board_millis();
 		end = start + timeout_ms;
-  	}
+	}
 
 	int remaining_time()
 	{	return end - board_millis();
