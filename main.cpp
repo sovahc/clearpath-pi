@@ -19,10 +19,16 @@ using std::byte;
 
 #include "Encoder.h"
 
+// HARDWARE:
+// Rotary encoder
 constexpr int ENCODER_PIN_A = 3;
 constexpr int ENCODER_PIN_B = 2;
 constexpr int ENCODER_BUTTON_PIN = 4;
 
+// Non-latching pushbutton
+constexpr int START_STOP_BUTTON_PIN = 5;
+
+// LCD 0802
 constexpr int LCD_D4 = 8;
 constexpr int LCD_D5 = 9;
 constexpr int LCD_D6 = 10;
@@ -32,7 +38,7 @@ constexpr int LCD_E  = 13;
 constexpr int LCD_RW  = 14;
 
 
-//
+// Logging functions
 
 template<bool enabled> class X_log
 {
@@ -174,6 +180,7 @@ public:
 
 X_byte_logger<false> DUMP_BYTES;
 
+// Tracks errors by line number.
 class X_rare_error_tracking
 {
 	// TODO? https://github.com/earlephilhower/arduino-pico/tree/master/libraries/EEPROM
@@ -183,18 +190,20 @@ class X_rare_error_tracking
 
 public:
 	void clear()
-	{	memset(&errors, 0, TOTAL_LINES * sizeof(errors[0]));
+	{
+		memset(&errors, 0, TOTAL_LINES * sizeof(errors[0]));
 	}
 
 	X_rare_error_tracking()
-	{	clear();
+	{
+		clear();
 	}
 
-	void operator () (unsigned line)
+	void operator()(unsigned line)
 	{
-		//LOG("\nE%d ", line);
+		// LOG("\nE%d ", line);
 		LCD::print(0, "E%d", line);
-	
+
 		++errors[line];
 	}
 };
@@ -218,12 +227,10 @@ public:
 	}
 };
 
-/**
- * Converts a vector of 7-bit bytes to 8-bit bytes.
- *
- * Pads the output to the specified integer size by appending filler bytes
- * (0xFF or 0x00 depending on the sign bit of the last input byte).
- */
+// Converts a vector of 7-bit bytes to 8-bit bytes.
+//
+// Pads the output to the specified integer size by appending filler bytes
+// (0xFF or 0x00 depending on the sign bit of the last input byte).
 void convert_7_to_8_bit(const vector<byte> &input, vector<byte> &output, int integer_size)
 {
 	if (input.empty())
@@ -323,6 +330,7 @@ public:
 	}
 };
 
+// Binary message that is sent to the motor and received from the motor
 class Message
 {
 	vector<byte> _7bit;
@@ -549,6 +557,7 @@ public:
 		LOG("initialization\n");
 
 		// I don't know what most of these bytes mean ¯\_(ツ)_/¯
+		// I recorded this using Wireshark
 
 		// needed
 		Message::cdc_write(byte(0xD0));
@@ -678,10 +687,7 @@ public:
 		return int_from_vector(tmp);
 	}
 
-	/**
-	 * Keep-alive function that periodically queries motor position
-	 * to prevent motor from timing out.
-	 */
+	// Keep-alive function that periodically queries motor position to prevent motor from timing out.
 	void ping()
 	{
 		if (board_millis() - last_motor_query_time > 1000)
@@ -761,6 +767,7 @@ public:
 	{	gpio_init(Pin);
 		gpio_set_dir(Pin, GPIO_IN);
 		gpio_pull_up(Pin);
+		// xx small pause?
 	}
 
 	bool pressed()
@@ -792,7 +799,11 @@ class User_interface
 	Rotary_encoder re;
 	My_button<ENCODER_BUTTON_PIN> re_button = My_button<ENCODER_BUTTON_PIN>();
 
+	My_button<START_STOP_BUTTON_PIN> ss_button = My_button<START_STOP_BUTTON_PIN>();
+
 	int motor_speed = 0;
+	bool rotation = false;
+
 	int division_steps = 1;
 	int division_step = 0;
 	int division_reference_position = 0;
@@ -806,6 +817,7 @@ class User_interface
 		MENU_ANGLE,
 		MENU_LAST = MENU_ANGLE,
 	};
+
 	int menu;
 
 public:
@@ -814,6 +826,8 @@ public:
 	{	
 		re.initialize(ENCODER_PIN_A, ENCODER_PIN_B);
 		re_button.initialize();
+
+		ss_button.initialize();
 
 		menu = MENU_SPEED_CONTROL;
 	}
@@ -838,6 +852,9 @@ public:
 			{	
 				division_reference_position = motor.get_position();
 			}
+
+			rotation = false;
+			ss_button.pressed(); // reset trigger
 		}
 
 		if(menu == MENU_SPEED_CONTROL)
@@ -850,10 +867,13 @@ public:
 			LCD::print(0, "SPEED");
 			LCD::print(1, "%+d", motor_speed);
 
+			if(ss_button.pressed())
+				rotation = !rotation; // start/stop motor rotation
+
 			if(pms != motor_speed)
 			{	pms = motor_speed;
 				
-				if(motor_speed == 0)
+				if(motor_speed == 0 || !rotation)
 				{	motor.motor_disable();
 				}
 				else
@@ -869,7 +889,6 @@ public:
 		{	
 			Rotary_encoder::value = limit_value(Rotary_encoder::value, 1, 360);
 
-			auto pds = division_steps;
 			division_steps = Rotary_encoder::value;
 
 			LCD::print(0, "STEPS");
@@ -888,6 +907,10 @@ public:
 			
 			LCD::print(0, "%d/%d", d, division_steps);
 			LCD::print(1, "%+d", delta);
+
+			if(ss_button.pressed()) // automatical move to the desired angle when the button is pressed
+			{	motor.motor_move(delta, motor.MAX_VELOCITY / 10, 2000);
+			}
 		}
 		else if(menu == MENU_ANGLE)
 		{
@@ -911,8 +934,6 @@ int main()
 	//
 
 	LCD::initialize();
-
-	LCD::print(0, "LOADING");
 
 	tuh_init(BOARD_TUH_RHPORT);
 
