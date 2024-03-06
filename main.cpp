@@ -8,16 +8,14 @@
 using std::vector;
 using std::byte;
 
-#include "bsp/board.h"
-#include "hardware/gpio.h"
-#include "hardware/uart.h"
-
-#include "pico/util/queue.h"
-#include "pico/multicore.h"
+#include <bsp/board.h>
+#include <hardware/gpio.h>
+#include <hardware/uart.h>
+#include <pico/multicore.h>
 
 #include "tusb.h"
 
-#include "pi-pico-LCD/lcd_display/lcd_display.hpp"
+#include "lcd_display.hpp"
 
 #include "Encoder.h"
 
