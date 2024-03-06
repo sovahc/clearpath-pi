@@ -78,7 +78,7 @@ public:
 
 	static void core1_entry()
 	{
-		sleep_ms(500);
+		sleep_ms(500); // LCD hardware initialization takes time
 
 		LCDdisplay lcd(LCD_D4, LCD_D5, LCD_D6, LCD_D7, LCD_RS, LCD_E, 8, 2);
 
@@ -893,7 +893,7 @@ public:
 		{
 			auto p = motor.get_position();
 			LCD::print(0, "ANGLE");
-			LCD::print(1, "%+.2f", 360 * fmod(p, ENCODER_STEPS_PER_ROTATION));
+			LCD::print(1, "%+.2f", 360 * fmod(p, ENCODER_STEPS_PER_ROTATION) / ENCODER_STEPS_PER_ROTATION);
 		}
 	}
 
