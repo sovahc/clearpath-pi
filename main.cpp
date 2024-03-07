@@ -861,18 +861,21 @@ public:
 		{
 			auto v = Rotary_encoder::value;
 
-			auto pms = motor_speed;
+			auto old = motor_speed;
 			motor_speed = limit_value(v * 5, -100, 100);
 
-			LCD::print(0, "SPEED");
-			LCD::print(1, "%+d", motor_speed);
+			bool changed = motor_speed != old;
+
+			LCD::print(0, "SPEED[%s]", rotation ? "R" : "");
+			LCD::print(1, "%+d%%", motor_speed);
 
 			if(ss_button.pressed())
-				rotation = !rotation; // start/stop motor rotation
+			{	rotation = !rotation; // start/stop motor rotation
+				changed = true;
+			}
 
-			if(pms != motor_speed)
-			{	pms = motor_speed;
-				
+			if(changed)
+			{	
 				if(motor_speed == 0 || !rotation)
 				{	motor.motor_disable();
 				}
@@ -909,8 +912,18 @@ public:
 			LCD::print(1, "%+d", delta);
 
 			if(ss_button.pressed()) // automatical move to the desired angle when the button is pressed
-			{	motor.motor_move(delta, motor.MAX_VELOCITY / 10, 2000);
+			{	
+				rotation = !rotation;
+
+				if(rotation)
+				{	motor.motor_enable();
+					motor.motor_move(-delta, motor.MAX_VELOCITY / 10, 2000);
+				}
+				else
+				{	motor.motor_disable();				
+				}
 			}
+
 		}
 		else if(menu == MENU_ANGLE)
 		{
